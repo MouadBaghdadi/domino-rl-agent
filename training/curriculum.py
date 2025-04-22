@@ -1,46 +1,54 @@
-import numpy as np
-from environment.domino_env import DominoEnv
+import yaml
+import logging
 
-class CurriculumWrapper:
-    """Implémente le curriculum learning basé sur Narvekar et al. 2020"""
-    def __init__(self):
-        self.env = DominoEnv()
-        self.difficulty_levels = [
-            {'visible_hands': True, 'blocking_enabled': False},  # Niveau 0
-            {'visible_hands': False, 'blocking_enabled': False}, # Niveau 1
-            {'visible_hands': False, 'blocking_enabled': True}   # Niveau 2
-        ]
-        self.current_level = 0
-        self.win_threshold = 0.8  # Taux de victoire requis pour niveau suivant
-        
-    def _update_difficulty(self, win_rate):
-        if win_rate > self.win_threshold and self.current_level < 2:
-            self.current_level += 1
-            print(f"Passage au niveau de difficulté {self.current_level}")
-            
-    def get_obs(self, raw_obs):
-        """Modifie les observations selon le niveau de difficulté"""
-        config = self.difficulty_levels[self.current_level]
-        
-        if config['visible_hands']:
-            # Révèle la main de l'adversaire
-            raw_obs['hidden_state'] = np.ones(28)
-            opponent_hand = self.env.players[1 - self.env.current_player]
-            for d in opponent_hand:
-                raw_obs['hidden_state'][self.env.domino_to_id(d)] = 0.0
-                
-        return raw_obs
-    
-    def step(self, action):
-        obs, reward, done, info = self.env.step(action)
-        
-        # Désactive le blocage pour les premiers niveaux
-        if not self.difficulty_levels[self.current_level]['blocking_enabled']:
-            if self.env._is_blocked():
-                done = False
-                reward += 10  # Encourage à continuer
-                
-        return self.get_obs(obs), reward, done, info
-    
-    def reset(self):
-        return self.get_obs(self.env.reset())
+logger = logging.getLogger(__name__)
+
+class CurriculumManager:
+    def __init__(self, config_path: str):
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+
+        self.enabled = config.get('curriculum_enabled', False)
+        if not self.enabled:
+            self.stages = [{'opponent': 'self', 'timesteps': config.get('total_timesteps', 1e6)}] # Défaut: self-play
+        else:
+            self.stages = config.get('stages', [])
+            if not self.stages:
+                logger.warning("Curriculum learning activé mais aucune étape définie dans la config!")
+                self.enabled = False 
+                self.stages = [{'opponent': 'self', 'timesteps': config.get('total_timesteps', 1e6)}]
+
+        self.current_stage_index = 0
+        self.timesteps_in_current_stage = 0
+        self.total_timesteps_across_stages = 0
+
+        cumulative_ts = 0
+        for stage in self.stages:
+             cumulative_ts += stage['timesteps']
+             stage['cumulative_timesteps'] = cumulative_ts
+
+
+    def get_current_stage(self, total_timesteps: int) -> dict:
+        """Détermine l'étape actuelle du curriculum en fonction des timesteps totaux."""
+        if not self.enabled:
+            return self.stages[0] 
+
+        target_stage = self.stages[-1]
+        for stage in self.stages:
+            if total_timesteps < stage['cumulative_timesteps']:
+                target_stage = stage
+                break
+
+        new_stage_index = self.stages.index(target_stage)
+        if new_stage_index != self.current_stage_index:
+             logger.info(f"Curriculum: Passage à l'étape {new_stage_index + 1}/{len(self.stages)}")
+             logger.info(f"Nouvel adversaire: {target_stage.get('opponent', 'N/A')}")
+             self.current_stage_index = new_stage_index
+
+        return target_stage
+
+    def get_opponent_type(self, total_timesteps: int) -> str:
+        """Retourne le type d'adversaire pour l'étape actuelle."""
+        stage = self.get_current_stage(total_timesteps)
+        return stage.get('opponent', 'self') 
+

@@ -1,32 +1,27 @@
-import numpy as np
+from typing import Dict, Any
 
 class RewardShaper:
-    """Reward shaping avancé inspiré de Ng et al. 1999"""
-    def __init__(self):
-        self.last_hand_strength = 0
-        self.history = []
-        
-    def shape(self, raw_reward, obs, done):
-        """Transforme la récompense brute selon des heuristiques"""
-        shaped_reward = raw_reward
-        
-        # 1. Pénalité pour dominos forts conservés (somme des points^2)
-        hand_strength = np.sum([sum(d)**2 for d in obs['hand']])
-        shaped_reward -= 0.01 * hand_strength
-        
-        # 2. Bonus pour diversité des options
-        valid_actions = np.sum(obs['valid_actions'])
-        shaped_reward += 0.1 * valid_actions
-        
-        # 3. Bonus pour création de doubles options
-        left, right = obs['board'][0][0], obs['board'][-1][1]
-        double_option_bonus = 1 if left == right else 0
-        shaped_reward += 2 * double_option_bonus
-        
-        # 4. Pénalité pour répétition de motifs
-        if len(self.history) > 3:
-            if self.history[-3:] == self.history[-6:-3]:
-                shaped_reward -= 5
-                
-        self.history.append(obs['board'].copy())
+    """Classe pour modifier ou ajouter des récompenses intermédiaires."""
+
+    def __init__(self, config: Dict[str, Any]):
+        self.penalty_per_draw = config.get('reward_shape_penalty_draw', -0.01)
+        self.reward_play_double = config.get('reward_shape_play_double', 0.02)
+        self.enabled = config.get('reward_shaping_enabled', False) # Activer/désactiver
+
+    def shape_reward(self, base_reward: float, action_info: Dict[str, Any], state_info: Dict[str, Any]) -> float:
+        """Modifie la récompense de base."""
+        if not self.enabled:
+            return base_reward
+
+        shaped_reward = base_reward
+        action_type = action_info.get("type")
+
+        if action_type == "draw" or action_type == "forced_draw":
+            shaped_reward += self.penalty_per_draw
+
+        elif action_type == "play":
+            tile_played = action_info.get("tile") 
+            if tile_played and tile_played.is_double():
+                shaped_reward += self.reward_play_double
+
         return shaped_reward

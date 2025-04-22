@@ -1,0 +1,34 @@
+#  Hyperparamètres PPO 
+gamma: 0.99           
+lambda: 0.95          
+clip_epsilon: 0.2     
+entropy_coeff: 0.01   
+value_loss_coeff: 0.5 
+learning_rate: 0.0003 
+epochs: 10            
+batch_size: 64        
+# max_grad_norm: 0.5  
+
+#  Architecture Réseau 
+lstm_hidden_dim: 128
+shared_hidden_dim: 128
+
+#  Entraînement 
+total_timesteps: 1000000 
+steps_per_collect: 2048  
+eval_frequency: 20000    
+eval_episodes: 20        
+save_frequency: 50000    
+log_dir: './logs/'       
+model_save_path: './models/ppo_domino_lstm' 
+
+#  Curriculum 
+curriculum_enabled: true
+stages:
+  - opponent: "random" 
+    timesteps: 100000  
+  - opponent: "greedy"
+    timesteps: 300000
+  - opponent: "self"        
+    timesteps: 600000       
+ 
