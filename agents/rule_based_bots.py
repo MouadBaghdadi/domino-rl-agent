@@ -2,9 +2,9 @@ import random
 from typing import List, Tuple, Dict, Any, Optional
 from environment.domino_env import DominoEnv
 from environment.utils import ALL_DOMINOS, INDEX_TO_DOMINO, MAX_DOMINO_VALUE
-from environment.domino_tile import DominoTile 
+from environment.domino_tile import DominoTile
 import numpy as np
-import logging 
+import logging
 
 logger = logging.getLogger(__name__)
 
@@ -23,19 +23,17 @@ class GreedyBot:
     Un bot qui essaie de jouer le domino avec la plus grande somme de points.
     Priorité: Jouer Max Valeur > Piocher > Passer.
     """
-
     def _decode_hand(self, hand_encoding: np.ndarray) -> List[DominoTile]:
         """ Reconstruit la liste des tuiles de la main à partir de l'encodage multi-binaire. """
         hand = []
         if hand_encoding.shape[0] == len(ALL_DOMINOS):
             for i, present in enumerate(hand_encoding):
-                if present > 0.5: # Utiliser > 0.5 pour comparer les floats/binaires
+                if present > 0.5: 
                     hand.append(INDEX_TO_DOMINO[i])
         else:
              logger.error(f"GreedyBot: Taille de hand_encoding ({hand_encoding.shape[0]}) incompatible avec ALL_DOMINOS ({len(ALL_DOMINOS)})")
         # hand.sort() 
         return hand
-
 
     def select_action(self, observation: Dict[str, Any], legal_action_mask: np.ndarray) -> int:
         """Sélectionne l'action 'la plus gourmande' parmi les actions légales."""
@@ -59,7 +57,7 @@ class GreedyBot:
         my_hand: List[DominoTile] = []
         if 'my_hand_encoding' in observation: 
              my_hand = self._decode_hand(observation['my_hand_encoding'])
-        elif 'my_hand' in observation and isinstance(observation['my_hand'][0], DominoTile): # Si l'obs contient la liste
+        elif 'my_hand' in observation and isinstance(observation['my_hand'][0], DominoTile): 
              my_hand = observation['my_hand']
         else:
              logger.warning("GreedyBot: Impossible de déterminer la main du joueur depuis l'observation.")
@@ -72,7 +70,7 @@ class GreedyBot:
                 continue 
             if action_code == action_pass:
                 can_pass = True
-                continue 
+                continue
 
             if best_play_action == -1: 
                  best_play_action = action_code

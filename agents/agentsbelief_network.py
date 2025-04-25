@@ -1,5 +1,6 @@
+# agents/agentsbelief_network.py
 import numpy as np
-from typing import List, Set, Dict, Optional, Tuple 
+from typing import List, Set, Dict, Optional, Tuple # Ajout de Tuple
 from environment.domino_tile import DominoTile
 from environment.utils import MAX_DOMINO_VALUE, ALL_DOMINOS, DOMINO_TO_INDEX, INDEX_TO_DOMINO
 
@@ -9,14 +10,17 @@ class BeliefNetwork:
     Prend en compte la main de l'agent, le plateau, et les actions de l'adversaire.
     """
     def __init__(self):
-        self.tile_probabilities = np.zeros(len(ALL_DOMINOS))
-        self.known_non_opponent_tiles: Set[DominoTile] = set() 
+        # self.possible_opponent_hands: Optional[Set[frozenset[DominoTile]]] = None
 
+        self.tile_probabilities = np.zeros(len(ALL_DOMINOS))
+        # self.known_opponent_tiles: Set[DominoTile] = set()
+        self.known_non_opponent_tiles: Set[DominoTile] = set()
         self.reset()
 
     def reset(self):
         """Réinitialise les croyances au début d'une partie."""
         self.tile_probabilities.fill(0.0)
+        # self.known_opponent_tiles = set() # Supprimé
         self.known_non_opponent_tiles = set()
 
 
@@ -81,6 +85,7 @@ class BeliefNetwork:
             known_mask = ~unknown_mask
             self.tile_probabilities[known_mask] = 0.0
 
+
         self.tile_probabilities = np.clip(self.tile_probabilities, 0.0, 1.0)
 
         # final_sum = self.tile_probabilities[unknown_indices].sum()
@@ -110,7 +115,7 @@ class BeliefNetwork:
         """
         action_type, tile_played, _ = opponent_action_info
 
-        is_first_update = not self.known_non_opponent_tiles 
+        is_first_update = not self.known_non_opponent_tiles
         if is_first_update:
             self._update_known_sets(my_hand, board)
             for i, tile in enumerate(ALL_DOMINOS):
@@ -118,7 +123,7 @@ class BeliefNetwork:
                     self.tile_probabilities[i] = 1.0
 
         else: 
-            self._update_known_sets(my_hand, board)
+            self._update_known_sets(my_hand, board) 
 
             if action_type == 'play' and tile_played is not None:
                 pass
@@ -129,7 +134,7 @@ class BeliefNetwork:
             elif action_type == 'pass':
                 indices_to_zero = []
                 for i, prob in enumerate(self.tile_probabilities):
-                    if prob > 1e-9: 
+                    if prob > 1e-9: # Utiliser une petite tolérance
                         tile = INDEX_TO_DOMINO[i]
                         if any(tile.matches(end) for end in open_ends):
                             indices_to_zero.append(i)

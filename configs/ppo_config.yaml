@@ -7,28 +7,55 @@ value_loss_coeff: 0.5
 learning_rate: 0.0003 
 epochs: 10            
 batch_size: 64        
-# max_grad_norm: 0.5  
+max_grad_norm: 0.5  # Uncommenting this as it's used in ppo_lstm_agent.py
 
 #  Architecture Réseau 
 lstm_hidden_dim: 128
 shared_hidden_dim: 128
+use_belief_network: true # Pour l'utilisation du réseau de croyance (belief network)
 
 #  Entraînement 
 total_timesteps: 1000000 
 steps_per_collect: 2048  
 eval_frequency: 20000    
 eval_episodes: 20        
-save_frequency: 50000    
+save_frequency: 50000   
+target_update_frequency: 10000 # Pour self-play
+target_update_tau: 1.0 # Pour self-play - mise à jour complète (1.0) ou partielle (<1.0)
 log_dir: './logs/'       
 model_save_path: './models/ppo_domino_lstm' 
+
+#  Reward Shaping
+reward_shaping:
+  enabled: true
+  penalty_draw: -0.05 # Pénalité pour piocher
+  reward_play_double: 0.1 # Récompense pour jouer un double
+  penalty_illegal_pass: -0.1 # Pénalité pour passage illégal
+  reward_empty_hand_fast: 0.1 # Récompense pour vider sa main rapidement
+  penalty_double_not_played: -0.1 # Pénalité pour ne pas jouer un double
 
 #  Curriculum 
 curriculum_enabled: true
 stages:
   - opponent: "random" 
-    timesteps: 100000  
+    timesteps: 100000
+    reward_shaping:
+      enabled: true
+      penalty_draw: -0.005
+      reward_play_double: 0.1
+      penalty_illegal_pass: -0.2
   - opponent: "greedy"
     timesteps: 300000
+    reward_shaping:
+      enabled: true
+      penalty_draw: -0.01
+      reward_play_double: 0.05
+      penalty_illegal_pass: -0.1
   - opponent: "self"        
-    timesteps: 600000       
+    timesteps: 600000
+    reward_shaping:
+      enabled: true
+      penalty_draw: -0.02
+      reward_play_double: 0.02
+      penalty_illegal_pass: -0.05
  

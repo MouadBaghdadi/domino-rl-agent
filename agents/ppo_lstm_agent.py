@@ -1,3 +1,4 @@
+from venv import logger
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
@@ -7,6 +8,44 @@ from typing import Tuple, Dict, Any, Optional, List
 
 from environment.utils import DEVICE, MAX_DOMINO_VALUE, HAND_SIZE, TOTAL_TILES, ALL_DOMINOS
 from .agentsbelief_network import BeliefNetwork
+
+class PPOMemory:
+    def __init__(self, batch_size):
+        self.obs = []
+        self.actions = []
+        self.log_probs = []
+        self.values = []
+        self.rewards = []
+        self.dones = []
+        self.batch_size = batch_size 
+
+    def store(self, obs, action, log_prob, value, reward, done):
+        self.obs.append(obs)
+        self.actions.append(action)
+        self.log_probs.append(log_prob)
+        self.values.append(value)
+        self.rewards.append(reward)
+        self.dones.append(done)
+
+    def get_data(self):
+        obs_tensor = torch.tensor(np.array(self.obs), dtype=torch.float32).to(DEVICE)
+        actions_tensor = torch.tensor(self.actions, dtype=torch.long).to(DEVICE)
+        log_probs_tensor = torch.tensor(self.log_probs, dtype=torch.float32).to(DEVICE)
+        values_tensor = torch.tensor(self.values, dtype=torch.float32).to(DEVICE)
+        rewards_tensor = torch.tensor(self.rewards, dtype=torch.float32).to(DEVICE)
+        dones_tensor = torch.tensor(self.dones, dtype=torch.bool).to(DEVICE)
+        return obs_tensor, actions_tensor, log_probs_tensor, values_tensor, rewards_tensor, dones_tensor
+
+    def clear(self):
+        self.obs = []
+        self.actions = []
+        self.log_probs = []
+        self.values = []
+        self.rewards = []
+        self.dones = []
+
+    def __len__(self):
+        return len(self.dones)
 
 class ActorCriticLSTM(nn.Module):
     def __init__(self, observation_dim, action_dim, lstm_hidden_dim=128, shared_hidden_dim=128):
@@ -38,28 +77,27 @@ class ActorCriticLSTM(nn.Module):
         return action_logits, state_value, new_hidden
 
 class PpoLstmAgent:
-    def __init__(self, observation_dim: int, action_dim: int, config: Dict[str, Any]):
+    def __init__(self, action_dim: int, config: Dict[str, Any]):
         self.config = config
         self.gamma = config.get('gamma', 0.99)
-        self.lamda = config.get('lambda', 0.95) # Pour GAE
+        self.lamda = config.get('lambda', 0.95) 
         self.clip_epsilon = config.get('clip_epsilon', 0.2)
         self.entropy_coeff = config.get('entropy_coeff', 0.01)
         self.value_loss_coeff = config.get('value_loss_coeff', 0.5)
         self.epochs = config.get('epochs', 10)
         self.batch_size = config.get('batch_size', 64)
         lr = config.get('learning_rate', 3e-4)
-        self.max_grad_norm = config.get('max_grad_norm', 0.5) # Ajout du clipping de gradient
-
+        self.max_grad_norm = config.get('max_grad_norm', 0.5) 
         lstm_hidden_dim = config.get('lstm_hidden_dim', 128)
         shared_hidden_dim = config.get('shared_hidden_dim', 128)
 
-        self.observation_dim = observation_dim
+        self.observation_dim = self._calculate_observation_dim(config) 
         self.action_dim = action_dim
 
         self.network = ActorCriticLSTM(self.observation_dim, self.action_dim, lstm_hidden_dim, shared_hidden_dim).to(DEVICE)
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr)
 
-        self.use_belief_network = config.get('use_belief_network', True) # Rendre configurable
+        self.use_belief_network = config.get('use_belief_network', True) 
         if self.use_belief_network:
             self.belief_network = BeliefNetwork()
         else:
@@ -67,7 +105,20 @@ class PpoLstmAgent:
 
         self.lstm_hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
 
-        self.trajectory_data = {'obs': [], 'actions': [], 'rewards': [], 'dones': [], 'log_probs': [], 'values': []}
+        self.memory = PPOMemory(batch_size=self.batch_size) 
+
+        self.last_train_metrics = {}
+
+    def update_hyperparameters(self, learning_rate: Optional[float] = None, entropy_coeff: Optional[float] = None):
+        """Met à jour les hyperparamètres de l'agent (ex: pour le curriculum)."""
+        if learning_rate is not None:
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = learning_rate
+            logger.info(f"Learning rate updated to: {learning_rate}")
+
+        if entropy_coeff is not None:
+            self.entropy_coeff = entropy_coeff
+            logger.info(f"Entropy coefficient updated to: {entropy_coeff}")
 
 
     def _calculate_observation_dim(self, config: Dict[str, Any]) -> int:
@@ -79,7 +130,6 @@ class PpoLstmAgent:
         belief_dim = len(ALL_DOMINOS) if config.get('use_belief_network', True) else 0
 
         total_dim = hand_dim + open_ends_dim + scalar_dim + board_history_dim + belief_dim
-        print(f"Calculated observation dimension: {total_dim}") 
         return total_dim
 
 
@@ -104,11 +154,12 @@ class PpoLstmAgent:
         my_hand_encoding = torch.tensor(obs['my_hand'], dtype=torch.float32)
         processed_features.append(my_hand_encoding)
 
+        # obs['open_ends'] est supposé être np.array([end1, end2]), avec MAX_DOMINO_VALUE+1 si pas d'extrémité.
         open_ends_normalized = torch.tensor(obs['open_ends'], dtype=torch.float32) / (MAX_DOMINO_VALUE + 1.0)
         processed_features.append(open_ends_normalized)
 
-        opponent_hand_size_norm = torch.tensor(obs['opponent_hand_size'], dtype=torch.float32) / HAND_SIZE
-        draw_pile_size_norm = torch.tensor(obs['draw_pile_size'], dtype=torch.float32) / max(1, TOTAL_TILES - 2*HAND_SIZE) 
+        opponent_hand_size_norm = torch.tensor([obs['opponent_hand_size'].item()], dtype=torch.float32) / HAND_SIZE
+        draw_pile_size_norm = torch.tensor([obs['draw_pile_size'].item()], dtype=torch.float32) / max(1, TOTAL_TILES - 2*HAND_SIZE)
         processed_features.append(opponent_hand_size_norm)
         processed_features.append(draw_pile_size_norm)
 
@@ -119,7 +170,7 @@ class PpoLstmAgent:
                  board_value_counts[s1] += 1
                  if not tile.is_double():
                      board_value_counts[s2] += 1
-        max_count_per_value = (MAX_DOMINO_VALUE + 1) + 1
+        max_count_per_value = (MAX_DOMINO_VALUE + 1) + 1 # (0-6) + double = 8
         board_value_counts_norm = torch.tensor(board_value_counts, dtype=torch.float32) / max_count_per_value
         processed_features.append(board_value_counts_norm)
 
@@ -186,22 +237,17 @@ class PpoLstmAgent:
 
 
     def store_transition(self, obs_tensor: torch.Tensor, action: int, reward: float, done: bool, log_prob: float, value: float):
-        """Stocke les éléments d'une transition dans la mémoire tampon."""
+        """Stocke les éléments d'une transition dans la mémoire tampon (self.memory)."""
         if not isinstance(obs_tensor, np.ndarray):
-             obs_np = obs_tensor.squeeze(0).cpu().numpy() 
-        else: 
+             obs_np = obs_tensor.squeeze(0).cpu().numpy()
+        else:
              obs_np = obs_tensor
 
-        self.trajectory_data['obs'].append(obs_np)
-        self.trajectory_data['actions'].append(action)
-        self.trajectory_data['rewards'].append(reward)
-        self.trajectory_data['dones'].append(done)
-        self.trajectory_data['log_probs'].append(log_prob)
-        self.trajectory_data['values'].append(value)
+        self.memory.store(obs_np, action, log_prob, value, reward, done)
 
     def clear_memory(self):
-        """Vide la mémoire tampon après une mise à jour."""
-        self.trajectory_data = {'obs': [], 'actions': [], 'rewards': [], 'dones': [], 'log_probs': [], 'values': []}
+        """Vide la mémoire tampon (self.memory) après une mise à jour."""
+        self.memory.clear()
 
     def _compute_gae(self, rewards: List[float], values: List[float], dones: List[bool], last_value: float = 0.0) -> Tuple[List[float], List[float]]:
         """
@@ -221,7 +267,7 @@ class PpoLstmAgent:
         advantages = []
         returns = []
         gae = 0.0
-        next_value = last_value 
+        next_value = last_value
 
         for t in reversed(range(len(rewards))):
             mask = 1.0 - dones[t] 
@@ -253,22 +299,22 @@ class PpoLstmAgent:
         Si vous souhaitez implémenter vous-même, voici les étapes clés :
         """
 
-        obs_tensor = torch.tensor(np.array(self.trajectory_data['obs']), dtype=torch.float32).to(DEVICE)
-        actions_tensor = torch.tensor(self.trajectory_data['actions'], dtype=torch.long).to(DEVICE)
-        old_log_probs_tensor = torch.tensor(self.trajectory_data['log_probs'], dtype=torch.float32).to(DEVICE)
-        values_tensor = torch.tensor(self.trajectory_data['values'], dtype=torch.float32).to(DEVICE)
-        rewards_tensor = torch.tensor(self.trajectory_data['rewards'], dtype=torch.float32).to(DEVICE)
-        dones_tensor = torch.tensor(self.trajectory_data['dones'], dtype=torch.bool).to(DEVICE) 
+        obs_tensor, actions_tensor, old_log_probs_tensor, values_tensor, rewards_tensor, dones_tensor = self.memory.get_data()
+
+        if len(obs_tensor) == 0:
+            logger.warning("Learn() appelé mais pas de données dans le buffer. Saut de l'apprentissage.")
+            self.last_train_metrics = {} 
+            return
 
         with torch.no_grad():
-            last_obs = obs_tensor[-1].unsqueeze(0) # Ajouter dim batch
+            last_obs = obs_tensor[-1].unsqueeze(0) #
             _, last_value_tensor, _ = self.network(last_obs, self.lstm_hidden) 
-            last_value = last_value_tensor.item() if not dones_tensor[-1] else 0.0 
+            last_value = last_value_tensor.item() if not dones_tensor[-1] else 0.0
 
         advantages_list, returns_list = self._compute_gae(
-            self.trajectory_data['rewards'],
-            self.trajectory_data['values'],
-            self.trajectory_data['dones'],
+            rewards_tensor.cpu().numpy().tolist(),  
+            values_tensor.cpu().numpy().tolist(),
+            dones_tensor.cpu().numpy().tolist(),
             last_value
         )
         advantages_tensor = torch.tensor(advantages_list, dtype=torch.float32).to(DEVICE)
@@ -279,7 +325,7 @@ class PpoLstmAgent:
         num_samples = len(obs_tensor)
         indices = np.arange(num_samples)
 
-        self.network.train() 
+        self.network.train()
 
         for epoch in range(self.epochs):
             np.random.shuffle(indices) 
@@ -293,8 +339,9 @@ class PpoLstmAgent:
                 batch_old_log_probs = old_log_probs_tensor[batch_indices]
                 batch_advantages = advantages_tensor[batch_indices]
                 batch_returns = returns_tensor[batch_indices]
+
                 current_logits, current_values, _ = self.network(batch_obs, lstm_hidden=None) 
-                current_values = current_values.squeeze(-1) 
+                current_values = current_values.squeeze(-1)
 
                 dist = Categorical(logits=current_logits)
                 current_log_probs = dist.log_prob(batch_actions)
@@ -305,7 +352,7 @@ class PpoLstmAgent:
 
                 surr1 = ratio * batch_advantages
                 surr2 = torch.clamp(ratio, 1.0 - self.clip_epsilon, 1.0 + self.clip_epsilon) * batch_advantages
-                actor_loss = -torch.min(surr1, surr2).mean()
+                actor_loss = -torch.min(surr1, surr2).mean() 
 
                 values_pred_clipped = values_tensor[batch_indices] + torch.clamp(current_values - values_tensor[batch_indices], -self.clip_epsilon, self.clip_epsilon)
                 vf_loss1 = (current_values - batch_returns).pow(2)
@@ -320,7 +367,14 @@ class PpoLstmAgent:
                 torch.nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
                 self.optimizer.step()
 
-        self.clear_memory()
+        self.last_train_metrics = {
+            'actor_loss': actor_loss.item(),
+            'value_loss': value_loss.item(),
+            'entropy': entropy.item(),
+            'total_loss': loss.item(),
+            'mean_advantage': advantages_tensor.mean().item(),
+            'mean_return': returns_tensor.mean().item()
+        }
 
 
     def save_model(self, path):
