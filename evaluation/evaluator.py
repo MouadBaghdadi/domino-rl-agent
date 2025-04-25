@@ -31,21 +31,23 @@ def evaluate_agent(agent_path_or_agent, config_path_or_config, num_episodes: int
         with open(config_path_or_config, 'r') as f:
             config = yaml.safe_load(f)
 
-    env = DominoEnv(render_mode=None) 
+    env = DominoEnv(render_mode=None)
 
-    obs_sample = env.observation_space.sample()
-    obs_dim_approx = sum(np.prod(v.shape) if hasattr(v, 'shape') else 1 for k, v in obs_sample.items() if k != 'board_sequence')
-    obs_dim_approx = int(obs_dim_approx)  # Convert to integer for LSTM
+    # L'agent calcule sa propre dimension d'obs à partir de la config
+    # obs_sample = env.observation_space.sample()
+    # obs_dim_approx = sum(np.prod(v.shape) if hasattr(v, 'shape') else 1 for k, v in obs_sample.items() if k != 'board_sequence')
+    # obs_dim_approx = int(obs_dim_approx)  # Convert to integer for LSTM
     action_dim = env.action_space.n
 
     if isinstance(agent_path_or_agent, PpoLstmAgent):
         agent = agent_path_or_agent
         logger.info("Utilisation de l'agent fourni directement")
     else:
-        agent = PpoLstmAgent(obs_dim_approx, action_dim, config)
+        # Initialiser l'agent sans obs_dim, il le calcule lui-même
+        agent = PpoLstmAgent(action_dim=action_dim, config=config)
         try:
             agent.load_model(agent_path_or_agent)
-            agent.network.eval() 
+            agent.network.eval()
             logger.info(f"Agent chargé depuis {agent_path_or_agent}")
         except FileNotFoundError:
             logger.error(f"Fichier modèle non trouvé: {agent_path_or_agent}")
@@ -59,9 +61,12 @@ def evaluate_agent(agent_path_or_agent, config_path_or_config, num_episodes: int
     if opponent_type == "random":
         opponent = RandomBot()
     elif opponent_type == "greedy":
-        opponent = GreedyBot(env)
-    # elif opponent_type == "self": 
-    #    opponent = PpoLstmAgent(...)
+        # Assumant que GreedyBot n'a plus besoin de env dans son constructeur
+        # Si une erreur survient ici, vérifier agents/rule_based_bots.py
+        opponent = GreedyBot()
+    # elif opponent_type == "self":
+    #    # Pour évaluer contre soi-même, il faudrait charger un deuxième agent
+    #    # ou utiliser une copie comme dans train.py
     else:
         logger.error(f"Type d'adversaire inconnu pour l'évaluation: {opponent_type}")
         return {"error": f"Unknown opponent type: {opponent_type}"}
@@ -78,17 +83,19 @@ def evaluate_agent(agent_path_or_agent, config_path_or_config, num_episodes: int
         agent.reset()
         if hasattr(opponent, 'reset'): opponent.reset()
         terminated = truncated = False
-        episode_reward_agent = 0 
+        episode_reward_agent = 0
+        current_info = info # Store initial info
 
         while not (terminated or truncated):
-            current_player = env.current_player 
+            current_player = env.current_player
 
             acting_agent = agent if current_player == 0 else opponent
             legal_mask = env.get_legal_action_mask()
 
             with torch.no_grad():
                 if isinstance(acting_agent, PpoLstmAgent):
-                    action, _, _ = acting_agent.select_action(obs_dict, legal_mask)
+                    # Pass obs_dict, current_info, and legal_mask
+                    action, _, _ = acting_agent.select_action(obs_dict, current_info, legal_mask)
                 elif isinstance(acting_agent, (RandomBot, GreedyBot)):
                     action = acting_agent.select_action(obs_dict, legal_mask)
                 else:
@@ -96,6 +103,7 @@ def evaluate_agent(agent_path_or_agent, config_path_or_config, num_episodes: int
 
             next_obs_dict, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
+            current_info = info 
 
             if current_player == 0:
                 episode_reward_agent += reward
