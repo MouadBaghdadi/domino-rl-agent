@@ -1,6 +1,5 @@
-# agents/agentsbelief_network.py
 import numpy as np
-from typing import List, Set, Dict, Optional, Tuple # Ajout de Tuple
+from typing import List, Set, Dict, Optional, Tuple 
 from environment.domino_tile import DominoTile
 from environment.utils import MAX_DOMINO_VALUE, ALL_DOMINOS, DOMINO_TO_INDEX, INDEX_TO_DOMINO
 
