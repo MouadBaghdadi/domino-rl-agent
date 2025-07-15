@@ -20,30 +20,3 @@ Dans ce projet j'implémente un agent basé sur l'apprentissage par renforcement
 * **Curriculum Learning**: Permet d'entraîner l'agent progressivement contre des adversaires de difficulté croissante (aléatoire, glouton, self-play).
 * **Configuration YAML**: Gestion centralisée des hyperparamètres et des configurations d'entraînement.
 * **Évaluation & Jeu Humain**: Scripts pour mesurer les performances de l'agent et jouer contre lui.
-
-## Installation
-
-1.  Clonez le dépôt :
-    ```bash
-    git clone <votre-url-repo>
-    cd domino_ppo_project
-    ```
-2.  Créez un environnement virtuel (recommandé) :
-    ```bash
-    python -m venv venv
-    source venv/bin/activate  # Linux/macOS
-    # venv\Scripts\activate  # Windows
-    ```
-3.  Installez les dépendances :
-    ```bash
-    pip install -r requirements.txt
-    ```
-
-## Utilisation
-
-### Entraînement
-
-Lancez le script d'entraînement principal :
-```bash
-cd training
-python train.py
